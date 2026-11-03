@@ -1,0 +1,1 @@
+class AssetIndex(dict): pass

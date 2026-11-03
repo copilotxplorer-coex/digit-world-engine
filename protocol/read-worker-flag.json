@@ -1,0 +1,20 @@
+{
+  "milestone": "read-worker-flag-m3",
+  "default_enabled": false,
+  "entrypoint": "gameplay_worker.read_server",
+  "enable_argument": "--enable-read-worker",
+  "read_actions": ["look", "nearby"],
+  "unchanged_actions": ["inspect", "say", "mutations", "account", "session"],
+  "response_schema_unchanged": true,
+  "worker_mode": "trusted-local-subprocess",
+  "request_waits_for_worker": false,
+  "pending_queue_capacity": 1,
+  "cache_entries": 1,
+  "cache_ttl_seconds": 5,
+  "worker_process_timeout_seconds": 8,
+  "fallback": "original-central-read",
+  "node_launcher_changed": false,
+  "production_packaging_ready": false,
+  "reward_enabled": false,
+  "performance_improvement_claimed": false
+}

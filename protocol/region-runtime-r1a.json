@@ -1,0 +1,37 @@
+{
+  "name": "region-runtime-r1a",
+  "version": 1,
+  "scope": "isolated autonomous single-node fixture",
+  "requires": "installed R0",
+  "node_id": "A",
+  "region_id": "lab-region",
+  "ruleset": "r1a-fixture-v1",
+  "receipt_states": [
+    "RECEIVED",
+    "SIMULATED",
+    "REJECTED_STALE_EPOCH"
+  ],
+  "verified_tick": 0,
+  "committed_tick": 0,
+  "replication": false,
+  "central_integration": false,
+  "verifier_pipeline": false,
+  "live_world": false,
+  "tick_owner": "Node A autonomous thread",
+  "scheduler": "monotonic; no unlimited catch-up; no logical tick skips",
+  "log": "bounded local SQLite + hash-chained tick records + original HMAC proof",
+  "recovery": "offline local replay then RECOVERY_PAUSED; fresh lab epoch required",
+  "security": "private trusted local lab; shared HMAC not malicious-node-proof",
+  "production_timing_policy": "not selected",
+  "lab_defaults": {
+    "hz": 30,
+    "pending": 64,
+    "commands_per_tick": 8,
+    "total_ticks": 2000,
+    "total_commands": 4096
+  },
+  "next": [
+    "R1-B independent replication",
+    "R1-C asynchronous trusted verification and commit"
+  ]
+}

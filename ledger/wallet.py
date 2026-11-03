@@ -1,0 +1,2 @@
+class WalletStore(dict):
+    pass

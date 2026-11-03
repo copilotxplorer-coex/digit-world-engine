@@ -1,0 +1,1 @@
+print("asset binding")

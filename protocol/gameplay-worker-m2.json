@@ -1,0 +1,22 @@
+{
+  "milestone": "gameplay-worker-m2",
+  "task_kind": "nearby_snapshot_v1",
+  "coordination_protocol": 2,
+  "game_runtime_version_unchanged": "0.3.5",
+  "game_protocol_unchanged": 2,
+  "game_schema_unchanged": 4,
+  "scope": "loopback-development-opt-in-read-only",
+  "max_entities": 64,
+  "max_radius": 30,
+  "snapshot_ttl_seconds": 5,
+  "max_pending_jobs": 128,
+  "result": ["snapshot_hash", "matches"],
+  "submit_fields": ["job_id", "lease_token", "result"],
+  "worker_world_db_access": false,
+  "runtime_look_replaced": false,
+  "reward_enabled": false,
+  "privacy": "trusted workers receive bounded public geometry including out-of-radius entities",
+  "central_verification": "full reference recomputation; no resource savings claimed",
+  "consume": "reconstruct from snapshot, check receipt digest, TTL and current geometry hash",
+  "planned": ["benchmark", "partitioning", "privacy-filtering", "runtime-feature-flag", "secure-vps-transport"]
+}

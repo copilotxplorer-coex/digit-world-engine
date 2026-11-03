@@ -1,0 +1,56 @@
+{
+  "protocol_version": 1,
+  "scope": "opt-in-loopback-fixture-lab",
+  "ruleset": "r1a-fixture-v1",
+  "region_id": "lab-region",
+  "primary": "A",
+  "replicas": [
+    "B",
+    "C"
+  ],
+  "messages": [
+    "REPLICA_HELLO",
+    "LOG_BATCH",
+    "STORED_ACK",
+    "APPLIED_ACK",
+    "GAP_REQUEST",
+    "REPLICA_STATUS",
+    "REPLICA_CONFLICT"
+  ],
+  "envelope": [
+    "protocol_version",
+    "ruleset",
+    "region_id",
+    "region_epoch",
+    "sender",
+    "recipient",
+    "replica_session_id",
+    "replica_boot",
+    "message_id",
+    "message_type",
+    "payload"
+  ],
+  "frontiers": [
+    "stored_tick",
+    "applied_tick",
+    "matched_tick",
+    "verified_tick",
+    "committed_tick"
+  ],
+  "verified_tick": 0,
+  "committed_tick": 0,
+  "production_failover": false,
+  "baseline_transfer": false,
+  "limits": {
+    "frame_bytes": 262144,
+    "batch_bytes": 131072,
+    "batch_ticks": 16,
+    "sender_ticks_per_request": 1,
+    "pending_ticks": 64,
+    "total_ticks": 2000,
+    "log_body_bytes": 8388608,
+    "commands": 4096,
+    "max_lead": 24
+  },
+  "timings_are_lab_settings_only": true
+}

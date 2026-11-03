@@ -1,0 +1,9 @@
+{
+  "enum": [
+    "OPEN",
+    "ACTIVE",
+    "COMPLETED",
+    "FAILED",
+    "CANCELLED"
+  ]
+}

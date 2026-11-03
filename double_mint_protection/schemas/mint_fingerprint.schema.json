@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "required": [
+    "operation_id",
+    "checkpoint_id",
+    "authority_version"
+  ]
+}

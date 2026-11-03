@@ -1,0 +1,1 @@
+class TreasuryRuntime: pass

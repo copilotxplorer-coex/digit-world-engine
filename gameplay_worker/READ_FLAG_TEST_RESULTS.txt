@@ -1,0 +1,14 @@
+----------------------------------------------------------------------
+Ran 265 tests in 132.694s
+
+OK
+{
+  "http_look_nearby_parity": true,
+  "verified_worker_hits": 2,
+  "stale_geometry_fallback": true,
+  "worker_unavailable_fallback": true,
+  "feature_flag_default": false,
+  "production_node_changed": false,
+  "soul_digit_awarded": 0
+}
+PASS: actual game HTTP look/nearby requests; OFF/ON response parity; verified subprocess worker cache hits; changed-world and unavailable-worker Central fallback; clean shutdown; no rewards.

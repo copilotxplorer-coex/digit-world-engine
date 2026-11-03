@@ -1,0 +1,2 @@
+class AssetCache(dict):
+    pass

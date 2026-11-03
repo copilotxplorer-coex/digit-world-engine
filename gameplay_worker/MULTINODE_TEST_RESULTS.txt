@@ -1,0 +1,27 @@
+----------------------------------------------------------------------
+Ran 269 tests in 138.203s
+
+OK
+command_rejected action=pickup reason=validation
+{
+  "central_processes": 1,
+  "worker_processes_started": 2,
+  "client_sessions": 2,
+  "single_world": true,
+  "verified_by_node": {
+    "node-a": 1,
+    "node-b": 5
+  },
+  "read_path_worker_hits": 3,
+  "movement_chat_objects_shared": true,
+  "pickup_race_single_winner": true,
+  "duplicate_commands_safe": true,
+  "node_a_stopped_node_b_served": true,
+  "both_workers_stopped_central_fallback": true,
+  "automatic_worker_failover_tested": false,
+  "network_scope": "single-machine-loopback",
+  "synthetic_fixtures": true,
+  "production_node_changed": false,
+  "soul_digit_awarded": 0
+}
+PASS: one Central World, two persistent worker processes and two authenticated HTTP clients; both nodes verified gameplay read jobs; shared movement/chat/build/items; duplicate/racing pickup safe; survivor worker and both-down Central fallback. Test-orchestrated dispatch, not production failover.

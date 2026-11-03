@@ -1,0 +1,5 @@
+{
+  "type": "escort",
+  "state": "OPEN",
+  "fail_condition": "client_dead"
+}

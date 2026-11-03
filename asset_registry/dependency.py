@@ -1,0 +1,1 @@
+class DependencyGraph(dict): pass

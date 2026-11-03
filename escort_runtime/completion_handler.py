@@ -1,0 +1,1 @@
+def arrived(): return "COMPLETED"

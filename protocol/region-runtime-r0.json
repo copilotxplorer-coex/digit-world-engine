@@ -1,0 +1,49 @@
+{
+  "name": "region-runtime-r0",
+  "version": 1,
+  "status": "isolated-local-fixture-only",
+  "region_count": 1,
+  "nodes": [
+    "A",
+    "B",
+    "C"
+  ],
+  "trusted_verifier_separate_process": true,
+  "existing_runtime_modified": false,
+  "live_world_connected": false,
+  "message_contract_coverage": "subset, not full v0.1 compliance",
+  "ruleset": "region-fixture-movement-v1",
+  "transport": "private local JSON multiprocessing pipes, test-only",
+  "pending_batches_limit": 1,
+  "max_commands_per_batch": 128,
+  "lab_lease_seconds": {
+    "unit_tests": 30,
+    "demo": 60
+  },
+  "production_timing_policy": "not decided",
+  "states": [
+    "PENDING",
+    "VERIFIED",
+    "COMMITTED",
+    "CANCELLED",
+    "CONFLICT"
+  ],
+  "not_implemented": [
+    "production command authentication",
+    "automatic heartbeat failure detector",
+    "continuous fixed-tick gameplay loop",
+    "speculative multi-batch pipeline",
+    "replicated durable checkpoints",
+    "standby replacement node D",
+    "live crafting/items/Soul",
+    "combat",
+    "zone transfer",
+    "public network transport",
+    "production key distribution",
+    "anti-Sybil",
+    "performance SLOs"
+  ],
+  "authority": "Central monotonic lease + durable epoch; restart revokes old grants",
+  "verification": "independent trusted reference replay; majority agreement alone cannot commit",
+  "recovery": "Central-local committed snapshot and receipts; not replicated checkpoint certification"
+}

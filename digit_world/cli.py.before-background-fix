@@ -1,0 +1,223 @@
+import argparse
+import getpass
+import secrets
+import json
+import os
+from pathlib import Path
+import shlex
+import threading
+import time
+import urllib.request
+import urllib.error
+import uuid
+from .core import compute
+
+HELP="""Commands:
+ account_new | me | look | nearby | inspect ENTITY_ID | move DX DY
+ say MESSAGE                    local chat within 30 units; 2-second cooldown
+ node [COUNT]                    demo compute jobs, NOT real distributed gameplay
+ craft brick | craft training_blade | jobs | cancel JOB_ID
+ place wall | build OBJECT_ID | dismantle OBJECT_ID
+ drop brick [QTY] | pickup DROP_ID
+ lock PLAYER_ID | flee | surrender | equip WEAPON_ID
+ charge [SOUL_AMOUNT] | aid PLAYER_ID [SOUL_AMOUNT]
+ autocharge on THRESHOLD SOUL_AMOUNT RESERVE | autocharge off | autocharge
+ account_setup | account_login | account_new | account
+ email_set | email_verify | forgot | reset_password | password_change
+ logout | resume | help | quit
+ Craft completes automatically. CLI Combat is fully automatic.
+ quit requests a server-owned logout countdown; logout keeps this console open.
+"""
+
+def format_event(event):
+    kind=event.get('kind','message'); d=event.get('data',{})
+    if kind=='chat_local':return '[local] '+d['sender_name']+' ('+d['sender_id']+'): '+d['text']
+    if kind=='combat_start': return 'Combat started: '+str(d.get('combat_id',''))+'; initiator='+d['initiator']+'; defender='+d['defender']+'; mode=auto'
+    if kind=='combat_end':
+        if d['outcome'] in ('escape','separation'):
+            return 'Combat ended: '+d['outcome']+'; escaped_players='+','.join(d['escaped_players'])+'; remaining_players='+','.join(d['remaining_players'])
+        return 'Combat ended: '+d['outcome']+'; winner='+str(d.get('winner'))+'; loser='+str(d.get('loser'))
+    if kind=='combat_hit':
+        extra=''
+        if d.get('weapon'): extra='; weapon='+d['weapon']+' durability='+str(d['durability_before'])+'->'+str(d['durability_after'])
+        return ('Combat '+str(d.get('combat_id',''))+' '+d['result']+': '+d['attacker']+' -> '+d['target']+
+                '; damage='+str(d['damage'])+'; HP='+str(d['hp_before'])+'->'+str(d['hp_after'])+extra)
+    if kind=='equipment_changed':
+        return 'Equipment changed: '+str(d['previous'])+' -> '+str(d['equipped'])+'; reason='+d['reason']
+    if kind=='auto_retreat_started': return 'Auto retreat: '+d['player']+'; reason='+d['reason']
+    if kind=='energy_depleted': return 'Digit Energy depleted: fireball; movement and combat disabled'
+    if kind=='energy_charged':
+        return 'Energy charged: target='+d['target']+'; Soul Digit spent='+str(d['spent_soul'])+'; energy='+str(d['energy_before'])+'->'+str(d['energy_after'])+'; automatic='+str(d['automatic'])
+    return event['message']
+
+def format_nearby(result):
+    origin=result['origin']
+    lines=['Nearby (radius '+str(result['radius'])+'); position=('+str(round(origin['x'],3))+', '+str(round(origin['y'],3))+')',
+           'Direction: 0=+X, 90=+Y, 180=-X, 270=-Y; no line-of-sight filtering yet.']
+    for group in ('players','objects','drops'):
+        lines.append(group+':')
+        if not result[group]:lines.append('  (none within view radius)')
+        for e in result[group]:
+            label=e.get('name',e.get('kind',e.get('item','')))
+            extra=(' form='+e['form']) if 'form' in e else ''
+            if 'progress' in e:extra+=' progress='+str(e['progress'])+'/4 usable='+str(e['usable'])
+            if 'qty' in e:extra+=' qty='+str(e['qty'])
+            lines.append('  '+e['id']+' '+label+' distance='+str(e['distance'])+' direction='+str(e['direction_degrees'])+extra)
+    return '\n'.join(lines)
+
+def main():
+    ap=argparse.ArgumentParser(); ap.add_argument('--server',default='http://127.0.0.1:8765'); ap.add_argument('--profile',default='player'); a=ap.parse_args()
+    if not a.profile.replace('-','').replace('_','').isalnum(): ap.error('Invalid profile name')
+    folder=Path.home()/'.digit-world'; folder.mkdir(exist_ok=True,mode=0o700)
+    path=folder/(a.profile+'.json'); token=''; logged=False; cursor=0
+    if path.exists():
+        saved=json.loads(path.read_text()); token=saved['token']
+        if saved.get('server') and saved['server'].rstrip('/')!=a.server.rstrip('/'):
+            ap.error('Profile belongs to a different server; use a separate profile')
+    def call(action,args=None,credential=None):
+        body=json.dumps({'action':action,'args':args or {},'request_id':uuid.uuid4().hex},allow_nan=False).encode()
+        req=urllib.request.Request(a.server.rstrip('/')+'/v1/command',body,{'Content-Type':'application/json','Authorization':'Bearer '+(token if credential is None else credential)})
+        try:
+            with urllib.request.urlopen(req,timeout=10) as response: data=json.load(response)
+        except urllib.error.HTTPError as exc:
+            try: message=json.load(exc).get('error','Request failed')
+            except Exception: message='Request failed'
+            raise ValueError(message) from None
+        return data['result']
+    def save_session(result):
+        nonlocal token,logged,cursor,last_heartbeat
+        temp=path.with_name(path.name+'.'+secrets.token_hex(4)+'.tmp')
+        fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(fd,'w',encoding='utf-8') as handle:
+            json.dump({'token':result['token'],'server':a.server},handle);handle.flush();os.fsync(handle.fileno())
+        os.replace(temp,path)
+        token=result['token'];logged=bool(result['online']);cursor=result['event_cursor'];last_heartbeat=0
+        print('Account session saved. Password/token not displayed.')
+        if result.get('warning'):print(result['warning'])
+    def new_password():
+        value=getpass.getpass('New password (12..128 characters, hidden): ')
+        if value!=getpass.getpass('Repeat password (hidden): '):raise ValueError('Passwords do not match')
+        return value
+    def destination_ready():
+        if not token:return
+        try:
+            if call('me')['online']:raise ValueError('Logout destination character and wait offline before account login')
+        except ValueError as exc:
+            if str(exc) not in ('Invalid token','Session expired; use account login'):raise
+    def account_command(cmd):
+        if cmd in ('account_setup','account_new'):
+            if cmd=='account_new':destination_ready()
+            user=input('Username (3..32 letters/digits/_): ').strip();password=new_password()
+            print('No verified recovery Email: if you forget the password, this account cannot be recovered.')
+            if input('Type YES to continue without recovery Email: ').strip().lower()!='yes':raise ValueError('Cancelled')
+            result=call('account_claim' if cmd=='account_setup' else 'account_register',{'username':user,'password':password,'ack_no_email':True})
+            save_session(result);print('Optional Email: use email_set after SMTP is configured.');return
+        if cmd=='account_login':
+            destination_ready();user=input('Username: ').strip();password=getpass.getpass('Password (hidden): ')
+            save_session(call('account_login',{'username':user,'password':password},credential=''));return
+        if cmd=='account':print(json.dumps(call('account_status'),indent=2,ensure_ascii=False));return
+        if cmd=='email_set':
+            address=input('Recovery Email: ').strip();password=getpass.getpass('Current password (hidden): ')
+            print(json.dumps(call('email_set',{'email':address,'password':password}),ensure_ascii=False));return
+        if cmd=='email_verify':
+            code=getpass.getpass('Email verification code (hidden): ').strip()
+            print(json.dumps(call('email_verify',{'code':code})));return
+        if cmd=='forgot':
+            print(json.dumps(call('password_forgot',{'username':input('Username: ').strip()},credential=''),ensure_ascii=False));return
+        if cmd=='reset_password':
+            code=getpass.getpass('Email reset code (hidden): ').strip();password=new_password()
+            print(json.dumps(call('password_reset',{'code':code,'password':password},credential='')));return
+        if cmd=='password_change':
+            old=getpass.getpass('Current password (hidden): ');password=new_password()
+            save_session(call('password_change',{'old_password':old,'password':password}));return
+    stop=threading.Event(); last_heartbeat=0
+    def login():
+        nonlocal logged,cursor
+        result=call('login'); logged=True; cursor=result['event_cursor']
+        print('Logged in. Automatic crafting and world events enabled.')
+    def background():
+        nonlocal logged,cursor,last_heartbeat
+        while not stop.wait(.5):
+            if not logged: continue
+            try:
+                if time.monotonic()-last_heartbeat>=5:
+                    call('heartbeat'); last_heartbeat=time.monotonic()
+                result=call('events',{'after':cursor})
+                for event in result['events']:
+                    cursor=event['seq']; print('\n[event] '+format_event(event),flush=True)
+            except Exception as exc:
+                if str(exc) in ('Invalid token','Session expired; use account login'):
+                    # account_setup/login rotates the credential while the background
+                    # request may still be in flight. Only revoke if the credential
+                    # used by this request is still the current credential.
+                    if request_token==token:
+                        logged=False; print('\n[event] Session revoked. Use account_login.',flush=True)
+                    continue
+                # A pending logout may have completed. Do not automatically log back in.
+                try:
+                    if not call('me')['online']:
+                        logged=False; print('\n[event] Offline. Use resume to log in again.',flush=True)
+                except Exception: pass
+    print('Digit World CLI 0.3.4 | '+a.profile)
+    if token:
+        try: login()
+        except Exception as exc: print('Login failed:',exc)
+    print(HELP)
+    thread=threading.Thread(target=background,daemon=True); thread.start()
+    try:
+        while True:
+            try:
+                raw=input('digit> ')
+                # Chat is literal text, not shell syntax: apostrophes and quotes are preserved.
+                if raw.strip().split(maxsplit=1)[:1]==['say']:
+                    pieces=raw.strip().split(maxsplit=1)
+                    print(json.dumps(call('say',{'text':pieces[1] if len(pieces)>1 else ''}),ensure_ascii=False))
+                    continue
+                parts=shlex.split(raw)
+                if not parts: continue
+                cmd,*v=parts
+                if cmd in ('quit','exit'): break
+                if cmd=='help': print(HELP); continue
+                if cmd in ('account_setup','account_new','account_login','account','email_set','email_verify','forgot','reset_password','password_change'):
+                    account_command(cmd);continue
+                if cmd in ('handoff','handoff_cancel','receive','recover'):raise ValueError('Handoff removed; use account_setup/account_login')
+                if cmd=='register':raise ValueError('Use account_new for NEW character, account_setup for existing character')
+                if cmd=='resume':
+                    if logged: print(json.dumps(call('resume')))
+                    else: login()
+                    continue
+                if cmd=='node':
+                    count=int(v[0]) if v else 1
+                    if not 1<=count<=100: raise ValueError('Count must be 1..100')
+                    for _ in range(count):
+                        job=call('node_job'); print(json.dumps(call('node_submit',{'job_id':job['job_id'],'result':compute(job)}))); time.sleep(.1)
+                    continue
+                if cmd=='move': args={'dx':float(v[0]),'dy':float(v[1])}
+                elif cmd in ('craft','place'): args={('item' if cmd=='craft' else 'kind'):v[0]}
+                elif cmd in ('claim','cancel'): args={'job_id':v[0]}
+                elif cmd in ('build','dismantle'): args={'object_id':v[0]}
+                elif cmd=='drop': args={'item':v[0],'qty':int(v[1]) if len(v)>1 else 1}
+                elif cmd=='pickup': args={'drop_id':v[0]}
+                elif cmd=='lock': args={'player_id':v[0]}
+                elif cmd=='inspect': args={'entity_id':v[0]}
+                elif cmd=='equip': args={'weapon_id':v[0]}
+                elif cmd=='charge': args={'amount':int(v[0]) if v else 1}
+                elif cmd=='aid': args={'player_id':v[0],'amount':int(v[1]) if len(v)>1 else 1}
+                elif cmd=='autocharge':
+                    if not v: args={}
+                    elif v==['off']: args={'enabled':False}
+                    elif len(v)==4 and v[0]=='on': args={'enabled':True,'threshold':float(v[1]),'amount':int(v[2]),'reserve':int(v[3])}
+                    else: raise ValueError('Use autocharge on THRESHOLD SOUL_AMOUNT RESERVE, autocharge off, or autocharge')
+                elif cmd in ('me','look','nearby','jobs','flee','surrender','logout'): args={}
+                else: raise ValueError('Unknown command; type help')
+                result=call(cmd,args)
+                if cmd=='nearby':print(format_nearby(result))
+                else:print(json.dumps(result,indent=2,ensure_ascii=False))
+            except (EOFError,KeyboardInterrupt): print(); break
+            except Exception as exc: print('Error:',exc)
+    finally:
+        stop.set(); thread.join(timeout=12)
+        if logged:
+            try: print('Logout requested:',json.dumps(call('logout')))
+            except Exception: print('Connection lost; server heartbeat timeout handles logout.')
+if __name__=='__main__': main()

@@ -1,0 +1,2 @@
+class ReplayGuard:
+    seen=set()

@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "required": [
+    "mission_id",
+    "client_id",
+    "destination"
+  ]
+}

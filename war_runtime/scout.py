@@ -1,0 +1,1 @@
+class ScoutRole: pass

@@ -1,0 +1,55 @@
+{
+  "contract_version": 1,
+  "runtime_protocol": 2,
+  "database_schema": 4,
+  "components": {
+    "central": {
+      "status": "existing_adapter",
+      "db_access": true,
+      "signing_key_access": false,
+      "responsibility": "Own authoritative accounts, sessions and World data; current adapter is loopback-only."
+    },
+    "node_worker": {
+      "status": "planned",
+      "db_access": false,
+      "signing_key_access": false,
+      "responsibility": "Execute assigned verifiable work; no direct authoritative DB writes."
+    },
+    "launcher": {
+      "status": "existing_adapter",
+      "db_access": false,
+      "signing_key_access": false,
+      "responsibility": "Verify signed releases and manage local server/client processes."
+    },
+    "cli": {
+      "status": "existing_adapter",
+      "db_access": false,
+      "signing_key_access": false,
+      "responsibility": "Send player commands using existing account authentication."
+    },
+    "client2d": {
+      "status": "existing_adapter",
+      "db_access": false,
+      "signing_key_access": false,
+      "responsibility": "Existing browser renderer; standalone executable planned."
+    },
+    "client3d": {
+      "status": "planned",
+      "db_access": false,
+      "signing_key_access": false,
+      "responsibility": "Future 3D renderer using the same player command contract."
+    },
+    "patch_distribution": {
+      "status": "planned",
+      "db_access": false,
+      "signing_key_access": false,
+      "responsibility": "Serve immutable signed releases; signing remains a separate restricted build step."
+    },
+    "rewards": {
+      "status": "planned",
+      "db_access": false,
+      "signing_key_access": false,
+      "responsibility": "Central validates contributions before authoritative Soul Digit ledger credit; no client self-awards."
+    }
+  }
+}

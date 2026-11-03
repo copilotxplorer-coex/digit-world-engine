@@ -1,0 +1,1 @@
+def delivered(): return "COMPLETED"

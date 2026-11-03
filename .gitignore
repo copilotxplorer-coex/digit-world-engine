@@ -1,0 +1,16 @@
+
+*.db
+*.sqlite
+*.sqlite3
+
+*-wal
+*-shm
+
+*.log
+*.bak
+*.lock
+
+__pycache__/
+.pytest_cache/
+
+*backup*

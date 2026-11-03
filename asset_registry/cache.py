@@ -1,0 +1,1 @@
+class RegistryCache(dict): pass

@@ -1,0 +1,16 @@
+----------------------------------------------------------------------
+Ran 204 tests in 108.446s
+
+OK
+{
+  "jobs": {
+    "verified": 4
+  },
+  "nodes": 2,
+  "protocol": 1,
+  "reward_enabled": false,
+  "soul_digit_awarded": 0,
+  "task_scope": "synthetic-validation-only",
+  "verified_results": 4
+}
+PASS: two worker processes registered, leased, heartbeated and submitted four verified synthetic jobs; duplicate-safe results; no game DB/profile/key access; Soul Digit awarded=0.

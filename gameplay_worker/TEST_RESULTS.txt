@@ -1,0 +1,14 @@
+----------------------------------------------------------------------
+Ran 238 tests in 120.127s
+
+OK
+{
+  "verified_jobs": 2,
+  "nearby_match_count": 2,
+  "worker_game_db_access": false,
+  "stale_after_movement_rejected": true,
+  "runtime_look_replaced": false,
+  "reward_enabled": false,
+  "soul_digit_awarded": 0
+}
+PASS: game World snapshot -> HTTP worker PROCESS -> Central verified read-only view; no World writes by worker/bridge; credentials excluded; stale result rejected; fresh job succeeds; no rewards.

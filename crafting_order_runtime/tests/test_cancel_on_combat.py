@@ -1,0 +1,1 @@
+print("cancel on combat")

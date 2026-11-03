@@ -1,0 +1,21 @@
+{
+  "milestone": "coordinator-worker-m1",
+  "coordination_protocol": 1,
+  "game_protocol_unchanged": 2,
+  "game_schema_unchanged": 4,
+  "scope": "loopback-development-only",
+  "task_kind": "validation_hash_v1",
+  "max_rounds": 1000,
+  "useful_gameplay_work": false,
+  "reward_enabled": false,
+  "game_db_access": false,
+  "public_enrollment": false,
+  "default_lease_seconds": 30,
+  "default_max_attempts": 3,
+  "active_leases_per_node": 1,
+  "automatic_worker_retry": false,
+  "result_idempotency_key": ["job_id", "node_id", "lease_token", "digest"],
+  "lease_reclamation": "on-next-claim",
+  "credential_storage": "sha256-high-entropy-bearer",
+  "planned": ["real-gameplay-task", "secure-vps-transport", "admission-quotas", "reward-ledger", "launcher-integration"]
+}

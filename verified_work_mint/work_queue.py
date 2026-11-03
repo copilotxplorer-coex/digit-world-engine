@@ -1,0 +1,1 @@
+class WorkQueue(list): pass

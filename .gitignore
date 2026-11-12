@@ -14,3 +14,10 @@ __pycache__/
 .pytest_cache/
 
 *backup*
+venv/
+__pycache__/
+*.pyc
+*.bak.*
+*.db
+*.db-wal
+*.db-shm

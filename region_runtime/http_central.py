@@ -3,6 +3,7 @@ import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from region_runtime.store import RegionStore
+from region_runtime.contract import signed
 
 
 class CentralApi(HTTPServer):
@@ -122,20 +123,124 @@ def serve(
 
                     snapshot = store.snapshot()
 
+                    envelope = signed(
+                        node_keys["A"],
+                        {
+                            "node_id": node_id,
+                            "epoch": snapshot["epoch"] + 1,
+                            "ttl": 30,
+                        },
+                    )
+
                     return self.reply(
                         200,
                         {
                             "ok": True,
-                            "result": {
-                                "node_id": node_id,
-                                "epoch": snapshot[
-                                    "epoch"
-                                ]
-                                + 1,
-                                "ttl": 30,
-                            },
+                            "result": envelope,
                         },
                     )
+
+                #
+                # ACTIVATE
+                #
+                if action == "activate":
+                    node_id = body["node_id"]
+                    ready = body["ready"]
+                    ttl = body.get("ttl", 30)
+
+                    response = store.grant(
+                        node_id,
+                        ready,
+                        ttl,
+                    )
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": response,
+                        },
+                    )
+
+
+                #
+                # PREPARE
+                #
+                if action == "prepare":
+                    proposal = body["proposal"]
+
+                    response = store.prepare(
+                        proposal["operation_id"],
+                        proposal["commands"],
+                    )
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": response,
+                        },
+                    )
+
+
+                #
+                # RESULT
+                #
+                if action == "result":
+                    node_id = body["node_id"]
+                    result = body["result"]
+
+                    response = store.result(
+                        node_id,
+                        result,
+                    )
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": response,
+                        },
+                    )
+
+                #
+                # VERIFY
+                #
+                if action == "verify":
+                    proposal = body["proposal"]
+                    results = body["results"]
+
+                    response = store.verify(
+                        proposal,
+                        results,
+                    )
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": response,
+                        },
+                    )
+
+                #
+                # COMMIT
+                #
+                if action == "commit":
+                    operation_id = body["operation_id"]
+
+                    response = store.commit(
+                        operation_id,
+                    )
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": response,
+                        },
+                    )
+
 
                 #
                 # STATUS

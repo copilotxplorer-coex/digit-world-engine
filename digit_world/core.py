@@ -2,7 +2,12 @@
 import hashlib
 import json
 import logging
+
 import math
+from .runtime_bridge import RuntimeBridge
+
+USE_REGION_RUNTIME = True
+
 from pathlib import Path
 import secrets
 import sqlite3
@@ -50,6 +55,8 @@ class World(EnergyMixin, CombatMixin, SocialMixin, AccountMixin):
         self.lock = threading.RLock()
         self.db = sqlite3.connect(path, check_same_thread=False, timeout=10)
         self.db.row_factory = sqlite3.Row
+
+        self.runtime = RuntimeBridge()
         version = self.db.execute('PRAGMA user_version').fetchone()[0]
         tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if version > SCHEMA:
@@ -231,6 +238,47 @@ class World(EnergyMixin, CombatMixin, SocialMixin, AccountMixin):
             if now<actor['move_after']: raise ValueError('Movement cooldown (0.2 seconds)')
             dx,dy=float(a['dx']),float(a['dy'])
             if not math.isfinite(dx) or not math.isfinite(dy) or math.hypot(dx,dy)>5: raise ValueError('Finite move <=5 units required')
+            if USE_REGION_RUNTIME:
+
+                result = self.runtime.move(
+                    player_id=pid,
+                    x=p['x'],
+                    y=p['y'],
+                    dx=dx,
+                    dy=dy,
+                )
+
+                if not result['approved']:
+                    raise ValueError(
+                        'Runtime rejected move'
+                    )
+
+                nx = result['new_x']
+                ny = result['new_y']
+
+                self.db.execute(
+                    'UPDATE players SET x=?,y=? WHERE id=?',
+                    (
+                        nx,
+                        ny,
+                        pid,
+                    )
+                )
+
+                self.db.execute(
+                    "UPDATE actors SET move_after=?,state='moving',until_at=? WHERE owner=?",
+                    (
+                        now+.2,
+                        now+.2,
+                        pid,
+                    )
+                )
+
+                return {
+                    'x': nx,
+                    'y': ny,
+                }
+
             self.db.execute('UPDATE players SET x=x+?,y=y+? WHERE id=?',(dx,dy,pid))
             self.db.execute("UPDATE actors SET move_after=?,state='moving',until_at=? WHERE owner=?",(now+.2,now+.2,pid))
             return {'x':p['x']+dx,'y':p['y']+dy}

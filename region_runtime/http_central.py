@@ -1,5 +1,66 @@
 import json
 import time
+
+work_queue = []
+work_results = {}
+
+work_status = {}
+assigned_work = {}
+
+import math
+
+def validate_move_result(
+    work,
+    result,
+):
+
+    payload = work["payload"]
+
+    if not isinstance(
+        result.get("approved"),
+        bool,
+    ):
+        return False
+
+    nx = result.get("new_x")
+    ny = result.get("new_y")
+
+    if not isinstance(
+        nx,
+        (int, float),
+    ):
+        return False
+
+    if not isinstance(
+        ny,
+        (int, float),
+    ):
+        return False
+
+    if not math.isfinite(nx):
+        return False
+
+    if not math.isfinite(ny):
+        return False
+
+    expected_x = (
+        payload["x"]
+        + payload["dx"]
+    )
+
+    expected_y = (
+        payload["y"]
+        + payload["dy"]
+    )
+
+    if nx != expected_x:
+        return False
+
+    if ny != expected_y:
+        return False
+
+    return True
+
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from region_runtime.store import RegionStore
@@ -245,6 +306,169 @@ def serve(
                 #
                 # STATUS
                 #
+                #
+                # enqueue_work
+                #
+                if action == "enqueue_work":
+
+                    work = body["work"]
+
+                    work_queue.append(
+                        work
+                    )
+
+                    work_status[
+                        work["work_id"]
+                    ] = {
+                        "status": "queued"
+                    }
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": {
+                                "queued": True,
+                                "work_id":
+                                    work["work_id"],
+                            },
+                        },
+                    )
+
+                #
+                # poll_work
+                #
+                if action == "poll_work":
+
+                    if not work_queue:
+
+                        return self.reply(
+                            200,
+                            {
+                                "ok": True,
+                                "result": None,
+                            },
+                        )
+
+                    work = work_queue.pop(0)
+
+                    assigned_work[
+                        work["work_id"]
+                    ] = work
+
+                    work_status[
+                        work["work_id"]
+                    ] = {
+                        "status": "assigned",
+                        "node_id":
+                            body["node_id"],
+                    }
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": work,
+                        },
+                    )
+
+                #
+                # submit_work
+                #
+                if action == "submit_work":
+
+                    work_id = body["work_id"]
+
+                    result = body["result"]
+
+                    #
+                    # find original work
+                    #
+                    original_work = assigned_work.get(
+                        work_id
+                    )
+
+                    #
+                    # validate move result
+                    #
+                    if (
+                        original_work
+                        and original_work.get("kind")
+                        == "move"
+                    ):
+
+                        ok = validate_move_result(
+                            original_work,
+                            result,
+                        )
+
+                        if not ok:
+
+                            return self.reply(
+                                400,
+                                {
+                                    "ok": False,
+                                    "error":
+                                        "Validation failed",
+                                },
+                            )
+
+                    work_results[work_id] = {
+                        "node_id":
+                            body["node_id"],
+                        "result":
+                            result,
+                    }
+
+                    work_status[
+                        work_id
+                    ] = {
+                        "status": "completed",
+                        "node_id":
+                            body["node_id"],
+                    }
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": {
+                                "accepted": True,
+                                "work_id":
+                                    work_id,
+                            },
+                        },
+                    )
+
+                #
+                # get_work_result
+                #
+                if action == "get_work_result":
+
+                    work_id = body["work_id"]
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": {
+                                "status":
+                                    work_status.get(
+                                        work_id,
+                                        {
+                                            "status":
+                                            "unknown"
+                                        },
+                                    ),
+                                "result":
+                                    work_results.get(
+                                        work_id,
+                                    ),
+                            },
+                        },
+                    )
+
+
                 if action == "nodes":
                     return self.reply(
                         200,

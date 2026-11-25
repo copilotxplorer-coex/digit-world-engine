@@ -413,9 +413,19 @@ def serve(
                                 },
                             )
 
+                    node_id = body["node_id"]
+
+                    worker_rewards[node_id] = (
+                        worker_rewards.get(
+                            node_id,
+                            0,
+                        )
+                        + 1
+                    )
+
                     work_results[work_id] = {
                         "node_id":
-                            body["node_id"],
+                            node_id,
                         "result":
                             result,
                     }
@@ -463,6 +473,30 @@ def serve(
                                 "result":
                                     work_results.get(
                                         work_id,
+                                    ),
+                            },
+                        },
+                    )
+
+
+                #
+                # worker_reward
+                #
+                if action == "worker_reward":
+
+                    node_id = body["node_id"]
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": {
+                                "node_id":
+                                    node_id,
+                                "reward":
+                                    worker_rewards.get(
+                                        node_id,
+                                        0,
                                     ),
                             },
                         },

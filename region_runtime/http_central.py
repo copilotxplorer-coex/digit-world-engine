@@ -7,6 +7,8 @@ work_results = {}
 work_status = {}
 assigned_work = {}
 
+worker_rewards = {}
+
 import math
 
 def validate_move_result(

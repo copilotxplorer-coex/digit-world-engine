@@ -7,6 +7,7 @@ import threading
 import urllib.request
 import urllib.error
 from .core import compute
+from node_worker.worker_client import WorkerClient
 
 HELP='''key_login | key_new | key_status | me | nearby | look | events
 move DX DY | say MESSAGE | inspect ID | lock PLAYER_ID | flee | surrender
@@ -53,7 +54,41 @@ def format_nearby(result):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--url',default='http://127.0.0.1:8765');a=ap.parse_args()
-    token='';online=False;stop=threading.Event()
+    token=''
+    online=False
+    stop=threading.Event()
+    worker=None
+
+    def start_worker():
+        nonlocal worker
+
+        if worker is None:
+            worker = WorkerClient(
+                node_id="PC-WORKER-01",
+            )
+
+        result = worker.start()
+
+        print(
+            "Worker:",
+            result,
+        )
+
+    def stop_worker():
+        nonlocal worker
+
+        if worker is None:
+            return
+
+        result = worker.stop()
+
+        print(
+            "Worker:",
+            result,
+        )
+
+        worker = None
+
     def call(action,args=None,credential=None):
         req=urllib.request.Request(a.url.rstrip('/')+'/v1/command',json.dumps({'action':action,'args':args or {}}).encode(),{'Content-Type':'application/json','Authorization':'Bearer '+(token if credential is None else credential)})
         try:response=urllib.request.urlopen(req,timeout=5)
@@ -94,7 +129,23 @@ def main():
                         if input('Save Key now. Type SAVED to activate: ')!='SAVED':continue
                         result=call('key_confirm',{'key':pending['login_key'],'ack_saved':True},pending['token'])
                         pending.clear()
-                    token=result['token'];online=True;print('Login successful; session credentials not displayed');continue
+                    token=result['token']
+                    online=True
+
+                    print(
+                        'Login successful; '
+                        'session credentials not displayed'
+                    )
+
+                    try:
+                        start_worker()
+                    except Exception as exc:
+                        print(
+                            'Worker start failed: '
+                            + str(exc)
+                        )
+
+                    continue
                 if not token:raise ValueError('Use key_login or key_new first')
                 if cmd=='move':args={'dx':float(v[0]),'dy':float(v[1])}
                 elif cmd=='say':args={'text':' '.join(v)}
@@ -116,6 +167,11 @@ def main():
                 elif cmd in ('key_status','me','nearby','look','events','jobs','flee','surrender','logout','resume'):args={}
                 else:raise ValueError('Unknown command; use help')
                 result=call(cmd,args)
+
+                if cmd=='logout':
+                    stop_worker()
+                    token=''
+                    online=False
                 if cmd=='events':
                     for event in result['events']:print(format_event(event))
                 elif cmd=='nearby':print(format_nearby(result))
@@ -124,7 +180,16 @@ def main():
             except (EOFError,KeyboardInterrupt):print();break
             except Exception as exc:print('Error: '+str(exc))
     finally:
-        stop.set();thread.join(timeout=6)
+        try:
+            stop_worker()
+        except Exception as exc:
+            print(
+                'Worker stop failed: '
+                + str(exc)
+            )
+
+        stop.set()
+        thread.join(timeout=6)
         if online:
             try:call('logout')
             except Exception:pass

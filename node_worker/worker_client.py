@@ -1,3 +1,4 @@
+import secrets
 import sys
 import threading
 import time
@@ -7,13 +8,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(
+        0,
+        str(ROOT),
+    )
 
 
 from region_runtime.http_peer import HttpPeer
 
 
-DEFAULT_CENTRAL_URL = "http://157.85.96.133:9001"
+#
+# Development fallback only.
+#
+# Production will replace this with:
+# https://game.2in.xyz/worker/
+#
+DEFAULT_CENTRAL_URL = (
+    "http://157.85.96.133:9001"
+)
 
 DEFAULT_NODE_ID = "PC-WORKER-01"
 
@@ -26,6 +38,9 @@ class WorkerClient:
         central_url=DEFAULT_CENTRAL_URL,
         node_id=DEFAULT_NODE_ID,
         poll_interval=0.5,
+        worker_ticket=None,
+        require_ticket=False,
+        peer=None,
     ):
         if not isinstance(
             central_url,
@@ -53,6 +68,11 @@ class WorkerClient:
                 "node_id is required"
             )
 
+        if len(node_id) > 128:
+            raise ValueError(
+                "node_id is too long"
+            )
+
         if not isinstance(
             poll_interval,
             (int, float),
@@ -69,14 +89,67 @@ class WorkerClient:
                 "poll_interval must be > 0 and <= 60"
             )
 
+        if worker_ticket is not None:
+            if not isinstance(
+                worker_ticket,
+                str,
+            ):
+                raise TypeError(
+                    "worker_ticket must be a string"
+                )
+
+            if (
+                not worker_ticket
+                or len(worker_ticket) > 4096
+            ):
+                raise ValueError(
+                    "Invalid worker_ticket"
+                )
+
+        if not isinstance(
+            require_ticket,
+            bool,
+        ):
+            raise TypeError(
+                "require_ticket must be bool"
+            )
+
+        if (
+            require_ticket
+            and not worker_ticket
+        ):
+            raise ValueError(
+                "worker_ticket is required"
+            )
+
         self.central_url = central_url
         self.node_id = node_id
         self.poll_interval = float(
             poll_interval
         )
 
-        self.central = HttpPeer(
-            self.central_url
+        self.require_ticket = (
+            require_ticket
+        )
+
+        #
+        # Ticket exists in memory only until attach succeeds.
+        # Never print or include it in exceptions.
+        #
+        self._worker_ticket = (
+            worker_ticket
+        )
+
+        self._worker_session_token = None
+        self._worker_session_id = None
+        self._worker_identity = None
+
+        self.central = (
+            peer
+            if peer is not None
+            else HttpPeer(
+                self.central_url
+            )
         )
 
         self._stop_event = (
@@ -84,9 +157,8 @@ class WorkerClient:
         )
 
         self._thread = None
-
         self._registered = False
-
+        self._attached = False
         self._last_error = None
 
     @property
@@ -96,6 +168,14 @@ class WorkerClient:
             and self._thread.is_alive()
             and not self._stop_event.is_set()
         )
+
+    @property
+    def attached(self):
+        return self._attached
+
+    @property
+    def worker_identity(self):
+        return self._worker_identity
 
     @property
     def last_error(self):
@@ -109,8 +189,16 @@ class WorkerClient:
                 "node_id": self.node_id,
             }
 
-        self._stop_event.clear()
+        if (
+            self.require_ticket
+            and not self._worker_ticket
+            and not self._worker_session_token
+        ):
+            raise ValueError(
+                "worker_ticket is required"
+            )
 
+        self._stop_event.clear()
         self._last_error = None
 
         self._thread = threading.Thread(
@@ -127,6 +215,11 @@ class WorkerClient:
         return {
             "started": True,
             "node_id": self.node_id,
+            "ticket_mode": (
+                self._worker_ticket is not None
+                or self._worker_session_token
+                is not None
+            ),
         }
 
     def stop(
@@ -150,12 +243,147 @@ class WorkerClient:
         if stopped:
             self._thread = None
 
+        #
+        # Clear local credentials on shutdown.
+        #
+        self._worker_ticket = None
+        self._worker_session_token = None
+        self._worker_session_id = None
+        self._worker_identity = None
+        self._attached = False
+        self._registered = False
+
         return {
             "stopped": stopped,
             "node_id": self.node_id,
         }
 
-    def _register(self):
+    def _session_fields(self):
+        if not self._worker_session_token:
+            if self.require_ticket:
+                raise RuntimeError(
+                    "Worker session is not attached"
+                )
+
+            return {}
+
+        return {
+            "worker_session_token":
+                self._worker_session_token,
+        }
+
+    def _attach(self):
+        ticket = self._worker_ticket
+
+        if not ticket:
+            if self.require_ticket:
+                raise RuntimeError(
+                    "Worker ticket is unavailable"
+                )
+
+            return None
+
+        #
+        # A fresh nonce prevents a captured attach response
+        # from being reused as another client request.
+        #
+        client_nonce = secrets.token_urlsafe(
+            24
+        )
+
+        result = self.central.call(
+            "worker_attach",
+            node_id=self.node_id,
+            worker_ticket=ticket,
+            client_nonce=client_nonce,
+        )
+
+        if not isinstance(
+            result,
+            dict,
+        ):
+            raise ValueError(
+                "Invalid worker attach response"
+            )
+
+        session_token = result.get(
+            "worker_session_token"
+        )
+
+        session_id = result.get(
+            "worker_session_id"
+        )
+
+        identity = result.get(
+            "worker_identity"
+        )
+
+        if (
+            not isinstance(
+                session_token,
+                str,
+            )
+            or not session_token
+            or len(session_token) > 512
+        ):
+            raise ValueError(
+                "Invalid worker session token"
+            )
+
+        if (
+            not isinstance(
+                session_id,
+                str,
+            )
+            or not session_id
+            or len(session_id) > 128
+        ):
+            raise ValueError(
+                "Invalid worker session id"
+            )
+
+        if (
+            not isinstance(
+                identity,
+                str,
+            )
+            or not identity
+            or len(identity) > 128
+        ):
+            raise ValueError(
+                "Invalid worker identity"
+            )
+
+        self._worker_session_token = (
+            session_token
+        )
+
+        self._worker_session_id = (
+            session_id
+        )
+
+        self._worker_identity = (
+            identity
+        )
+
+        self._attached = True
+
+        #
+        # One-time Ticket is removed immediately after attach.
+        #
+        self._worker_ticket = None
+
+        print(
+            (
+                "WORKER ATTACHED "
+                f"node_id={self.node_id}"
+            ),
+            flush=True,
+        )
+
+        return result
+
+    def _register_legacy(self):
         result = self.central.call(
             "register",
             node_id=self.node_id,
@@ -168,6 +396,24 @@ class WorkerClient:
             result,
             flush=True,
         )
+
+        return result
+
+    def _connect(self):
+        if self._worker_session_token:
+            self._attached = True
+            return
+
+        if self._worker_ticket:
+            self._attach()
+            return
+
+        if self.require_ticket:
+            raise RuntimeError(
+                "Worker ticket is required"
+            )
+
+        self._register_legacy()
 
     def _execute_move(
         self,
@@ -253,14 +499,20 @@ class WorkerClient:
         }
 
     def _run_once(self):
+        session_fields = (
+            self._session_fields()
+        )
+
         self.central.call(
             "heartbeat",
             node_id=self.node_id,
+            **session_fields,
         )
 
         work = self.central.call(
             "poll_work",
             node_id=self.node_id,
+            **session_fields,
         )
 
         if not work:
@@ -291,6 +543,7 @@ class WorkerClient:
                 node_id=self.node_id,
                 work_id=work_id,
                 result=result,
+                **session_fields,
             )
         )
 
@@ -299,6 +552,21 @@ class WorkerClient:
             submit_result,
             flush=True,
         )
+
+    def _reset_connection_state(
+        self,
+    ):
+        if self.require_ticket:
+            #
+            # A Ticket is one-time-use. Never retry attach
+            # automatically with a consumed Ticket.
+            #
+            self._attached = False
+            self._worker_session_token = None
+            self._worker_session_id = None
+            self._worker_identity = None
+        else:
+            self._registered = False
 
     def _run(self):
         print(
@@ -311,8 +579,11 @@ class WorkerClient:
 
         while not self._stop_event.is_set():
             try:
-                if not self._registered:
-                    self._register()
+                if (
+                    not self._registered
+                    and not self._attached
+                ):
+                    self._connect()
 
                 self._run_once()
 
@@ -327,9 +598,7 @@ class WorkerClient:
                     flush=True,
                 )
 
-                # Register ใหม่หลัง connection
-                # หรือ Central restart
-                self._registered = False
+                self._reset_connection_state()
 
             self._stop_event.wait(
                 self.poll_interval

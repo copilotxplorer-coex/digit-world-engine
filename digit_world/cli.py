@@ -90,13 +90,118 @@ def main():
         worker = None
 
     def call(action,args=None,credential=None):
-        req=urllib.request.Request(a.url.rstrip('/')+'/v1/command',json.dumps({'action':action,'args':args or {}}).encode(),{'Content-Type':'application/json','Authorization':'Bearer '+(token if credential is None else credential)})
-        try:response=urllib.request.urlopen(req,timeout=5)
-        except urllib.error.HTTPError as exc:response=exc
+        endpoint = (
+            a.url.rstrip("/")
+            + "/v1/command"
+        )
+
+        payload = json.dumps(
+            {
+                "action": action,
+                "args": args or {},
+            }
+        ).encode(
+            "utf-8"
+        )
+
+        req = urllib.request.Request(
+            endpoint,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": (
+                    "DigitWorldCLI/0.3.3"
+                ),
+                "Authorization": (
+                    "Bearer "
+                    + (
+                        token
+                        if credential is None
+                        else credential
+                    )
+                ),
+            },
+            method="POST",
+        )
+
+        try:
+            response = urllib.request.urlopen(
+                req,
+                timeout=15,
+            )
+        except urllib.error.HTTPError as exc:
+            response = exc
+
         with response:
-            data=json.load(response)
-            if not data.get('ok'):raise ValueError(data.get('error','Request failed'))
-            return data['result']
+            status = getattr(
+                response,
+                "status",
+                response.getcode(),
+            )
+
+            content_type = (
+                response.headers.get(
+                    "Content-Type",
+                    "",
+                )
+            )
+
+            raw = response.read()
+
+        if not raw:
+            raise ValueError(
+                "Empty response from "
+                f"{endpoint}; "
+                f"HTTP {status}"
+            )
+
+        try:
+            text = raw.decode(
+                "utf-8"
+            )
+        except UnicodeDecodeError:
+            text = raw.decode(
+                "utf-8",
+                errors="replace",
+            )
+
+        try:
+            data = json.loads(
+                text
+            )
+        except json.JSONDecodeError:
+            preview = " ".join(
+                text[:200].split()
+            )
+
+            raise ValueError(
+                "Non-JSON response from "
+                f"{endpoint}; "
+                f"HTTP {status}; "
+                f"Content-Type="
+                f"{content_type or 'unknown'}; "
+                f"body={preview!r}"
+            )
+
+        if not isinstance(
+            data,
+            dict,
+        ):
+            raise ValueError(
+                "Invalid JSON response "
+                f"from {endpoint}"
+            )
+
+        if not data.get("ok"):
+            raise ValueError(
+                data.get(
+                    "error",
+                    "Request failed",
+                )
+            )
+
+        return data["result"]
     def heartbeat():
         nonlocal online
         while not stop.wait(5):

@@ -1,4 +1,5 @@
 import json
+import os
 import time
 
 work_queue = []
@@ -69,6 +70,7 @@ from region_runtime.store import RegionStore
 from region_runtime.contract import signed
 
 
+from region_runtime.worker_sessions import WorkerSessionStore
 class CentralApi(HTTPServer):
     allow_reuse_address = True
 
@@ -88,6 +90,35 @@ def serve(
 
     nodes = {}
 
+    worker_session_store = None
+
+    worker_ticket_secret = os.environ.get(
+        "DIGIT_WORLD_WORKER_TICKET_SECRET"
+    )
+
+    worker_session_db = os.environ.get(
+        "DIGIT_WORLD_WORKER_SESSION_DB",
+        "/opt/digit-world/rr/worker_sessions.db",
+    )
+
+    if worker_ticket_secret:
+        worker_session_store = WorkerSessionStore(
+            worker_session_db,
+            ticket_secret=worker_ticket_secret,
+            lease_seconds=30,
+        )
+
+        print(
+            "Persistent Worker sessions enabled: "
+            + worker_session_db,
+            flush=True,
+        )
+    else:
+        print(
+            "Persistent Worker sessions disabled: "
+            "missing DIGIT_WORLD_WORKER_TICKET_SECRET",
+            flush=True,
+        )
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -128,6 +159,76 @@ def serve(
                 #
                 # REGISTER
                 #
+                #
+                # WORKER ATTACH
+                #
+                if action == "worker_attach":
+                    if worker_session_store is None:
+                        raise ValueError(
+                            "Worker Ticket mode "
+                            "is unavailable"
+                        )
+
+                    required_fields = {
+                        "worker_ticket",
+                        "node_id",
+                        "client_nonce",
+                    }
+
+                    missing_fields = [
+                        name
+                        for name in required_fields
+                        if name not in body
+                    ]
+
+                    if missing_fields:
+                        raise ValueError(
+                            "Missing Worker attach fields: "
+                            + ", ".join(
+                                sorted(
+                                    missing_fields
+                                )
+                            )
+                        )
+
+                    response = (
+                        worker_session_store.attach(
+                            worker_ticket=body[
+                                "worker_ticket"
+                            ],
+                            node_id=body[
+                                "node_id"
+                            ],
+                            client_nonce=body[
+                                "client_nonce"
+                            ],
+                        )
+                    )
+
+                    node_id = body[
+                        "node_id"
+                    ]
+
+                    now = time.time()
+
+                    nodes[node_id] = {
+                        "registered": now,
+                        "last_seen": now,
+                        "ticket_mode": True,
+                        "worker_identity":
+                            response[
+                                "worker_identity"
+                            ],
+                    }
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": response,
+                        },
+                    )
+
                 if action == "register":
                     node_id = body["node_id"]
 
@@ -150,9 +251,87 @@ def serve(
                 #
                 # HEARTBEAT
                 #
+                #
+                # WORKER TICKET HEARTBEAT
+                #
                 if action == "heartbeat":
-                    node_id = body["node_id"]
+                    node_id = body[
+                        "node_id"
+                    ]
 
+                    worker_token = body.get(
+                        "worker_session_token"
+                    )
+
+                    if worker_token:
+                        if worker_session_store is None:
+                            raise ValueError(
+                                "Worker Ticket mode "
+                                "is unavailable"
+                            )
+
+                        session = (
+                            worker_session_store.heartbeat(
+                                worker_session_token=(
+                                    worker_token
+                                ),
+                                node_id=node_id,
+                            )
+                        )
+
+                        now = time.time()
+
+                        existing_node = nodes.get(
+                            node_id,
+                            {},
+                        )
+
+                        nodes[node_id] = {
+                            "registered":
+                                existing_node.get(
+                                    "registered",
+                                    now,
+                                ),
+                            "last_seen": now,
+                            "ticket_mode": True,
+                            "worker_identity":
+                                session[
+                                    "player_id"
+                                ],
+                            "worker_session_id":
+                                session[
+                                    "worker_session_id"
+                                ],
+                        }
+
+                        return self.reply(
+                            200,
+                            {
+                                "ok": True,
+                                "result": {
+                                    "status": "alive",
+                                    "node_id": node_id,
+                                    "worker_identity":
+                                        session[
+                                            "player_id"
+                                        ],
+                                    "worker_session_id":
+                                        session[
+                                            "worker_session_id"
+                                        ],
+                                    "lease_expires_at":
+                                        session[
+                                            "lease_expires_at"
+                                        ],
+                                },
+                            },
+                        )
+
+                    #
+                    # Legacy development path.
+                    # Remove after HTTPS Worker Gateway
+                    # and Ticket mode pass production tests.
+                    #
                     if node_id not in nodes:
                         raise ValueError(
                             "unknown node"
@@ -169,13 +348,11 @@ def serve(
                             "result": {
                                 "status": "alive",
                                 "node_id": node_id,
+                                "ticket_mode": False,
                             },
                         },
                     )
 
-                #
-                # GRANT
-                #
                 if action == "grant":
                     node_id = body["node_id"]
 
@@ -340,7 +517,47 @@ def serve(
                 #
                 # poll_work
                 #
+                #
+                # WORKER TICKET POLL
+                #
                 if action == "poll_work":
+                    node_id = body[
+                        "node_id"
+                    ]
+
+                    worker_token = body.get(
+                        "worker_session_token"
+                    )
+
+                    worker_session = None
+
+                    if worker_token:
+                        if worker_session_store is None:
+                            raise ValueError(
+                                "Worker Ticket mode "
+                                "is unavailable"
+                            )
+
+                        worker_session = (
+                            worker_session_store.authenticate(
+                                worker_session_token=(
+                                    worker_token
+                                ),
+                                node_id=node_id,
+                                renew=False,
+                            )
+                        )
+
+                    else:
+                        #
+                        # Legacy migration path.
+                        # Remove after HTTPS Worker Gateway
+                        # passes production tests.
+                        #
+                        if node_id not in nodes:
+                            raise ValueError(
+                                "unknown node"
+                            )
 
                     if not work_queue:
 
@@ -363,7 +580,23 @@ def serve(
                     ] = {
                         "status": "assigned",
                         "node_id":
-                            body["node_id"],
+                            node_id,
+                        "worker_identity":
+                            (
+                                worker_session[
+                                    "player_id"
+                                ]
+                                if worker_session
+                                else None
+                            ),
+                        "worker_session_id":
+                            (
+                                worker_session[
+                                    "worker_session_id"
+                                ]
+                                if worker_session
+                                else None
+                            ),
                     }
 
                     return self.reply(
@@ -377,35 +610,140 @@ def serve(
                 #
                 # submit_work
                 #
+                #
+                # WORKER TICKET SUBMIT
+                #
                 if action == "submit_work":
+                    node_id = body[
+                        "node_id"
+                    ]
 
-                    work_id = body["work_id"]
+                    work_id = body[
+                        "work_id"
+                    ]
 
-                    result = body["result"]
+                    result = body[
+                        "result"
+                    ]
 
-                    #
-                    # find original work
-                    #
+                    worker_token = body.get(
+                        "worker_session_token"
+                    )
+
+                    worker_session = None
+
+                    if worker_token:
+                        if worker_session_store is None:
+                            raise ValueError(
+                                "Worker Ticket mode "
+                                "is unavailable"
+                            )
+
+                        worker_session = (
+                            worker_session_store.authenticate(
+                                worker_session_token=(
+                                    worker_token
+                                ),
+                                node_id=node_id,
+                                renew=False,
+                            )
+                        )
+
+                    else:
+                        #
+                        # Legacy migration path.
+                        # Remove after HTTPS Worker Gateway
+                        # passes production tests.
+                        #
+                        if node_id not in nodes:
+                            raise ValueError(
+                                "unknown node"
+                            )
+
                     original_work = assigned_work.get(
                         work_id
                     )
 
+                    if original_work is None:
+                        raise ValueError(
+                            "Unknown assigned work"
+                        )
+
+                    assignment = work_status.get(
+                        work_id,
+                        {},
+                    )
+
+                    if (
+                        assignment.get(
+                            "status"
+                        )
+                        != "assigned"
+                    ):
+                        raise ValueError(
+                            "Work is not assigned"
+                        )
+
+                    if (
+                        assignment.get(
+                            "node_id"
+                        )
+                        != node_id
+                    ):
+                        raise ValueError(
+                            "Assigned Worker mismatch"
+                        )
+
+                    if worker_session:
+                        assigned_identity = (
+                            assignment.get(
+                                "worker_identity"
+                            )
+                        )
+
+                        assigned_session_id = (
+                            assignment.get(
+                                "worker_session_id"
+                            )
+                        )
+
+                        if (
+                            assigned_identity
+                            != worker_session[
+                                "player_id"
+                            ]
+                        ):
+                            raise ValueError(
+                                "Assigned Worker "
+                                "identity mismatch"
+                            )
+
+                        if (
+                            assigned_session_id
+                            != worker_session[
+                                "worker_session_id"
+                            ]
+                        ):
+                            raise ValueError(
+                                "Assigned Worker "
+                                "session mismatch"
+                            )
+
                     #
-                    # validate move result
+                    # Validate untrusted Worker result.
                     #
                     if (
-                        original_work
-                        and original_work.get("kind")
+                        original_work.get(
+                            "kind"
+                        )
                         == "move"
                     ):
-
-                        ok = validate_move_result(
+                        valid = validate_move_result(
                             original_work,
                             result,
                         )
 
-                        if not ok:
-
+                        if not valid:
                             return self.reply(
                                 400,
                                 {
@@ -415,29 +753,64 @@ def serve(
                                 },
                             )
 
-                    node_id = body["node_id"]
+                    persistent_reward = None
 
-                    worker_rewards[node_id] = (
-                        worker_rewards.get(
-                            node_id,
-                            0,
+                    if worker_session:
+                        persistent_reward = (
+                            worker_session_store.credit_reward(
+                                worker_session_token=(
+                                    worker_token
+                                ),
+                                node_id=node_id,
+                                work_id=work_id,
+                                reward=1,
+                            )
                         )
-                        + 1
-                    )
+                    else:
+                        #
+                        # Legacy reward exists only during
+                        # the migration period.
+                        #
+                        worker_rewards[node_id] = (
+                            worker_rewards.get(
+                                node_id,
+                                0,
+                            )
+                            + 1
+                        )
 
                     work_results[work_id] = {
-                        "node_id":
-                            node_id,
-                        "result":
-                            result,
+                        "node_id": node_id,
+                        "worker_identity":
+                            (
+                                worker_session[
+                                    "player_id"
+                                ]
+                                if worker_session
+                                else None
+                            ),
+                        "result": result,
                     }
 
-                    work_status[
-                        work_id
-                    ] = {
+                    work_status[work_id] = {
                         "status": "completed",
-                        "node_id":
-                            body["node_id"],
+                        "node_id": node_id,
+                        "worker_identity":
+                            (
+                                worker_session[
+                                    "player_id"
+                                ]
+                                if worker_session
+                                else None
+                            ),
+                        "worker_session_id":
+                            (
+                                worker_session[
+                                    "worker_session_id"
+                                ]
+                                if worker_session
+                                else None
+                            ),
                     }
 
                     return self.reply(
@@ -446,15 +819,21 @@ def serve(
                             "ok": True,
                             "result": {
                                 "accepted": True,
-                                "work_id":
-                                    work_id,
+                                "work_id": work_id,
+                                "worker_identity":
+                                    (
+                                        worker_session[
+                                            "player_id"
+                                        ]
+                                        if worker_session
+                                        else None
+                                    ),
+                                "reward":
+                                    persistent_reward,
                             },
                         },
                     )
 
-                #
-                # get_work_result
-                #
                 if action == "get_work_result":
 
                     work_id = body["work_id"]
@@ -484,10 +863,97 @@ def serve(
                 #
                 # worker_reward
                 #
+                #
+                # WORKER TICKET DETACH
+                #
+                if action == "worker_detach":
+                    if worker_session_store is None:
+                        raise ValueError(
+                            "Worker Ticket mode "
+                            "is unavailable"
+                        )
+
+                    worker_token = body.get(
+                        "worker_session_token"
+                    )
+
+                    if not worker_token:
+                        raise ValueError(
+                            "Worker session token "
+                            "is required"
+                        )
+
+                    response = (
+                        worker_session_store.detach(
+                            worker_session_token=(
+                                worker_token
+                            ),
+                            node_id=body.get(
+                                "node_id"
+                            ),
+                        )
+                    )
+
+                    node_id = body.get(
+                        "node_id"
+                    )
+
+                    if node_id:
+                        nodes.pop(
+                            node_id,
+                            None,
+                        )
+
+                    return self.reply(
+                        200,
+                        {
+                            "ok": True,
+                            "result": response,
+                        },
+                    )
+
+                #
+                # WORKER TICKET REWARD
+                #
                 if action == "worker_reward":
+                    node_id = body[
+                        "node_id"
+                    ]
 
-                    node_id = body["node_id"]
+                    worker_token = body.get(
+                        "worker_session_token"
+                    )
 
+                    if worker_token:
+                        if worker_session_store is None:
+                            raise ValueError(
+                                "Worker Ticket mode "
+                                "is unavailable"
+                            )
+
+                        reward_result = (
+                            worker_session_store.get_reward(
+                                worker_session_token=(
+                                    worker_token
+                                ),
+                                node_id=node_id,
+                            )
+                        )
+
+                        return self.reply(
+                            200,
+                            {
+                                "ok": True,
+                                "result":
+                                    reward_result,
+                            },
+                        )
+
+                    #
+                    # Legacy migration path.
+                    # Remove after HTTPS Worker Gateway
+                    # passes production tests.
+                    #
                     return self.reply(
                         200,
                         {
@@ -503,7 +969,6 @@ def serve(
                             },
                         },
                     )
-
 
                 if action == "nodes":
                     return self.reply(

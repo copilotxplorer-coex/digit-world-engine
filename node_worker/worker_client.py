@@ -222,6 +222,53 @@ class WorkerClient:
             ),
         }
 
+    def _detach(
+        self,
+    ):
+        token = (
+            self._worker_session_token
+        )
+
+        if not token:
+            return {
+                "detached": False,
+                "reason": "no-session",
+            }
+
+        try:
+            result = self.central.call(
+                "worker_detach",
+                node_id=self.node_id,
+                worker_session_token=token,
+            )
+
+            print(
+                (
+                    "WORKER DETACHED "
+                    f"node_id={self.node_id}"
+                ),
+                flush=True,
+            )
+
+            return result
+
+        except Exception as exc:
+            #
+            # Shutdown must continue even if the
+            # network is unavailable. The Central
+            # lease will expire automatically.
+            #
+            print(
+                "WORKER DETACH ERROR:",
+                repr(exc),
+                flush=True,
+            )
+
+            return {
+                "detached": False,
+                "reason": "request-failed",
+            }
+
     def stop(
         self,
         timeout=5,
@@ -244,6 +291,12 @@ class WorkerClient:
             self._thread = None
 
         #
+        # Release the Central Worker session before
+        # clearing the local session credential.
+        #
+        detach_result = self._detach()
+
+        #
         # Clear local credentials on shutdown.
         #
         self._worker_ticket = None
@@ -256,6 +309,7 @@ class WorkerClient:
         return {
             "stopped": stopped,
             "node_id": self.node_id,
+            "detach": detach_result,
         }
 
     def _session_fields(self):
